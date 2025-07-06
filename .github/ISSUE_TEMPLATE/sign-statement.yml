@@ -1,0 +1,30 @@
+name: Sign the Statement of Organization
+description: Add your signature to the Grass Roots Cyber Statement of Organization.
+title: "Signature: [YOUR NAME HERE]"
+labels: [signature]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Name or Organization
+      placeholder: John Doe or Example Org
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Representation
+      options:
+        - Individual
+        - Organization
+    validations:
+      required: true
+
+  - type: input
+    id: date
+    attributes:
+      label: Date
+      placeholder: YYYY-MM-DD
+    validations:
+      required: true
