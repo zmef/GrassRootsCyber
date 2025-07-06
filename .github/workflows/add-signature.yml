@@ -11,12 +11,12 @@ jobs:
     steps:
       - name: Check for 'signature' label
         if: contains(join(github.event.issue.labels.*.name), 'signature')
-        run: echo "Label 'signature' found. Proceeding."
+        run: echo "✅ Label 'signature' found. Proceeding."
 
       - name: Exit if label not found
         if: "!contains(join(github.event.issue.labels.*.name), 'signature')"
         run: |
-          echo "No 'signature' label found. Exiting."
+          echo "❌ No 'signature' label found. Skipping job."
           exit 0
 
       - name: Checkout repository
@@ -26,16 +26,32 @@ jobs:
 
       - name: Parse issue body and append to JSON
         run: |
-          echo "Raw issue body:"
-          echo "${{ github.event.issue.body }}"
+          echo "📄 Raw issue body:"
+          echo "${{ github.event.issue.body }}" > issue.txt
+          cat issue.txt
 
-          NAME=$(echo "${{ github.event.issue.body }}" | awk '/### Name or Organization/{getline; print}' | xargs)
-          TYPE=$(echo "${{ github.event.issue.body }}" | awk '/### Representation/{getline; print}' | xargs)
-          DATE=$(echo "${{ github.event.issue.body }}" | awk '/### Date/{getline; print}' | xargs)
+          # Function to extract value after a heading, skipping blank lines
+          get_val() {
+            awk "/### $1/{getline; while(\$0 ~ /^$/){getline}; print}" issue.txt | xargs
+          }
 
-          echo "Parsed: $NAME | $TYPE | $DATE"
+          NAME=$(get_val "Name or Organization")
+          TYPE=$(get_val "Representation")
+          DATE=$(get_val "Date")
+
+          echo "🔍 Parsed:"
+          echo "  Name: $NAME"
+          echo "  Type: $TYPE"
+          echo "  Date: $DATE"
+
+          if [ -z "$NAME" ] || [ -z "$TYPE" ] || [ -z "$DATE" ]; then
+            echo "❌ One or more fields are empty. Aborting."
+            exit 1
+          fi
 
           cd signatures
+          [ -f signatures.json ] || echo "[]" > signatures.json
+
           jq --arg name "$NAME" --arg type "$TYPE" --arg date "$DATE" \
             '. += [{"name": $name, "type": $type, "date": $date}]' \
             signatures.json > tmp.json && mv tmp.json signatures.json
@@ -45,5 +61,6 @@ jobs:
           git config user.name "gh-actions"
           git config user.email "actions@github.com"
           git add signatures/signatures.json
-          git commit -m "Add signature: $NAME" || echo "No changes to commit"
+          git diff --staged || true
+          git commit -m "Add signature: $NAME" || echo "⚠️ No changes to commit"
           git push
