@@ -1,4 +1,5 @@
 name: Add Signature to signatures.json
+
 on:
   issues:
     types: [opened]
@@ -19,11 +20,15 @@ jobs:
           echo "Issue body:"
           echo "${{ github.event.issue.body }}"
 
-          NAME=$(echo "${{ github.event.issue.body }}" | grep -oP '(?<=### Name or Organization\s).*' | xargs)
-          TYPE=$(echo "${{ github.event.issue.body }}" | grep -oP '(?<=### Representation\s).*' | xargs)
-          DATE=$(echo "${{ github.event.issue.body }}" | grep -oP '(?<=### Date\s).*' | xargs)
+          # Extract values from issue body using awk
+          NAME=$(echo "${{ github.event.issue.body }}" | awk '/### Name or Organization/{getline; print}' | xargs)
+          TYPE=$(echo "${{ github.event.issue.body }}" | awk '/### Representation/{getline; print}' | xargs)
+          DATE=$(echo "${{ github.event.issue.body }}" | awk '/### Date/{getline; print}' | xargs)
 
-          echo "Parsed values: $NAME | $TYPE | $DATE"
+          echo "Parsed values:"
+          echo "Name: $NAME"
+          echo "Type: $TYPE"
+          echo "Date: $DATE"
 
           cd signatures
           jq --arg name "$NAME" --arg type "$TYPE" --arg date "$DATE" \
