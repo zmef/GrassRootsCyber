@@ -6,10 +6,19 @@ on:
 
 jobs:
   add-signature:
-    if: contains(github.event.issue.labels.*.name, 'signature')
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check for 'signature' label
+        if: contains(join(github.event.issue.labels.*.name), 'signature')
+        run: echo "Label 'signature' found. Proceeding."
+
+      - name: Exit if label not found
+        if: "!contains(join(github.event.issue.labels.*.name), 'signature')"
+        run: |
+          echo "No 'signature' label found. Exiting."
+          exit 0
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -17,18 +26,14 @@ jobs:
 
       - name: Parse issue body and append to JSON
         run: |
-          echo "Issue body:"
+          echo "Raw issue body:"
           echo "${{ github.event.issue.body }}"
 
-          # Extract values from issue body using awk
           NAME=$(echo "${{ github.event.issue.body }}" | awk '/### Name or Organization/{getline; print}' | xargs)
           TYPE=$(echo "${{ github.event.issue.body }}" | awk '/### Representation/{getline; print}' | xargs)
           DATE=$(echo "${{ github.event.issue.body }}" | awk '/### Date/{getline; print}' | xargs)
 
-          echo "Parsed values:"
-          echo "Name: $NAME"
-          echo "Type: $TYPE"
-          echo "Date: $DATE"
+          echo "Parsed: $NAME | $TYPE | $DATE"
 
           cd signatures
           jq --arg name "$NAME" --arg type "$TYPE" --arg date "$DATE" \
