@@ -1,0 +1,141 @@
+# Verify a Nostr signature and add the member to the roll
+#
+# Same security posture as add-signature.yml: untrusted issue content only
+# enters scripts via environment variables, GITHUB_TOKEN only, validated,
+# deduplicated (by npub AND name). The Schnorr signature is verified with
+# nostr-tools before anything is written — a forged event never lands.
+
+name: Add Nostr signature to the public roll
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: signatures
+  cancel-in-progress: false
+
+jobs:
+  verify-and-add:
+    if: contains(github.event.issue.labels.*.name, 'nostr-signature')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install nostr-tools
+        run: npm install --no-save nostr-tools@2
+
+      - name: Parse issue and verify signature
+        id: verify
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$ISSUE_BODY" > issue.txt
+
+          get_val() {
+            awk -v h="### $1" '
+              $0 == h { found=1; next }
+              found && NF { print; exit }
+            ' issue.txt
+          }
+
+          # Extract everything under the event heading, dropping code fences
+          get_block() {
+            awk -v h="### $1" '
+              $0 == h { found=1; next }
+              found && /^### / { exit }
+              found && $0 !~ /^```/ { print }
+            ' issue.txt
+          }
+
+          RAW_NAME=$(get_val "Name or Organization")
+          RAW_TYPE=$(get_val "Representation")
+          EVENT_JSON=$(get_block "Signed Nostr Event")
+
+          NAME=$(printf '%s' "$RAW_NAME" | tr -d '[:cntrl:]' | sed 's/^ *//;s/ *$//' | cut -c1-80)
+          [ -n "$NAME" ] && [ "$NAME" != "_No response_" ] \
+            || { echo "::error::Name is missing."; exit 1; }
+
+          case "$RAW_TYPE" in
+            Individual|Organization) TYPE="$RAW_TYPE" ;;
+            *) echo "::error::Representation must be Individual or Organization."; exit 1 ;;
+          esac
+
+          # Cryptographic verification — the gate everything hangs on
+          RESULT=$(NOSTR_EVENT="$EVENT_JSON" node scripts/verify-nostr.mjs)
+          NPUB=$(printf '%s' "$RESULT" | jq -r '.npub')
+          DATE=$(printf '%s' "$RESULT" | jq -r '.date')
+          EVENT_ID=$(printf '%s' "$RESULT" | jq -r '.id')
+
+          mkdir -p signatures
+          [ -f signatures/signatures.json ] || echo "[]" > signatures/signatures.json
+
+          # Dedupe on npub or name
+          if jq -e --arg npub "$NPUB" --arg name "$NAME" \
+               '(map(.via // "" | contains($npub)) | any) or
+                (map(.name | ascii_downcase) | index($name | ascii_downcase) != null)' \
+               signatures/signatures.json > /dev/null; then
+            echo "duplicate=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::This key or name is already on the roll."
+            exit 0
+          fi
+
+          jq --arg name "$NAME" --arg type "$TYPE" --arg date "$DATE" \
+             --arg via "nostr:$NPUB" --arg event "$EVENT_ID" \
+             '. += [{name: $name, type: $type, date: $date, via: $via, event: $event}]' \
+             signatures/signatures.json > tmp.json
+          mv tmp.json signatures/signatures.json
+
+          echo "duplicate=false" >> "$GITHUB_OUTPUT"
+          echo "npub=$NPUB" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.verify.outputs.duplicate == 'false'
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          git config user.name "grc-garden-bot"
+          git config user.email "actions@github.com"
+          git add signatures/signatures.json
+          git commit -m "Plant a Nostr-verified signature (closes #${ISSUE_NUMBER})"
+          git push
+
+      - name: Welcome the member and close the issue
+        if: always() && steps.verify.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          DUPLICATE: ${{ steps.verify.outputs.duplicate }}
+          NPUB: ${{ steps.verify.outputs.npub }}
+        run: |
+          set -euo pipefail
+          if [ "$DUPLICATE" = "true" ]; then
+            BODY="This key or name is already on the roll — welcome back to the garden. 🌱"
+          else
+            BODY=$'⚡🌱 **Signature verified and planted.** Welcome to Grass Roots Cyber.\n\nYour Schnorr signature checked out ('"$NPUB"$') and your plot is in [the garden](https://zmef.github.io/GrassRootsCyber/#garden). Anyone can re-verify your signature from the public roll, forever.\n\nNext step: show up. Whoever shows up is the right person.'
+          fi
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
+
+      - name: Explain failure on the issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body \
+            "⚠️ The signature couldn't be verified — usually a malformed event JSON, an invalid signature, or content that doesn't reference the Statement of Organization. Check the [workflow log](../actions) for the exact reason, fix, and open a new issue. The easiest path is the **Sign with Nostr** button on the website."
