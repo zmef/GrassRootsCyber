@@ -1,0 +1,47 @@
+name: ⚡ Sign with your Nostr key
+description: Join Grass Roots Cyber with a cryptographically verifiable Nostr signature.
+title: "Nostr Signature: [YOUR NAME HERE]"
+labels: [nostr-signature]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **The most verifiable way to join.** You sign a Nostr event affirming the
+        [Statement of Organization](../blob/main/grassrootscyber_statement.md) with
+        your own key; our automation verifies the Schnorr signature before adding
+        you to the roll — and anyone can re-verify it forever.
+
+        Easiest path: use the **Sign with Nostr** button on
+        [the website](https://zmef.github.io/GrassRootsCyber/#join), which builds
+        and pre-fills everything via your NIP-07 extension (Alby, nos2x, etc).
+
+  - type: input
+    id: name
+    attributes:
+      label: Name or Organization
+      description: How you want to appear on the roll. Max 80 characters.
+      placeholder: Ada Lovelace
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Representation
+      options:
+        - Individual
+        - Organization
+    validations:
+      required: true
+
+  - type: textarea
+    id: event
+    attributes:
+      label: Signed Nostr Event
+      description: >
+        The full signed event as JSON (kind 1). Its content must reference the
+        Grass Roots Cyber Statement of Organization. The signing date is taken
+        from the event's own created_at timestamp.
+      render: json
+    validations:
+      required: true

@@ -1,0 +1,94 @@
+# Add a paper signature — for in-person joiners
+#
+# Trust model: this workflow can only be run by someone with write access
+# to the repo, so the person running it acts as the witness of record.
+# Their GitHub handle is stored in the `via` field automatically.
+#
+# Flow at an event: someone signs the printed Statement of Organization,
+# you snap a photo for your records, then run this from the Actions tab
+# (Actions → "Add a paper signature" → Run workflow) — takes 30 seconds
+# from your phone.
+
+name: Add a paper signature
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Name or organization (as written on paper)"
+        required: true
+        type: string
+      representation:
+        description: "Individual or Organization"
+        required: true
+        type: choice
+        options:
+          - Individual
+          - Organization
+      date:
+        description: "Date signed (YYYY-MM-DD)"
+        required: true
+        type: string
+      location:
+        description: "Where it was signed (e.g. Patch Party, Metamora Library)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: signatures
+  cancel-in-progress: false
+
+jobs:
+  add-paper-signature:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate and append signature
+        env:
+          RAW_NAME: ${{ inputs.name }}
+          TYPE: ${{ inputs.representation }}
+          RAW_DATE: ${{ inputs.date }}
+          RAW_LOCATION: ${{ inputs.location }}
+          WITNESS: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+
+          NAME=$(printf '%s' "$RAW_NAME" | tr -d '[:cntrl:]' | sed 's/^ *//;s/ *$//' | cut -c1-80)
+          [ -n "$NAME" ] || { echo "::error::Name is empty."; exit 1; }
+
+          printf '%s' "$RAW_DATE" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
+            || { echo "::error::Date must be YYYY-MM-DD."; exit 1; }
+
+          LOCATION=$(printf '%s' "$RAW_LOCATION" | tr -d '[:cntrl:]' | cut -c1-80)
+
+          mkdir -p signatures
+          [ -f signatures/signatures.json ] || echo "[]" > signatures/signatures.json
+
+          if jq -e --arg name "$NAME" \
+               'map(.name | ascii_downcase) | index($name | ascii_downcase)' \
+               signatures/signatures.json > /dev/null; then
+            echo "::error::'$NAME' is already on the roll."
+            exit 1
+          fi
+
+          VIA="paper:witness=$WITNESS"
+          [ -n "$LOCATION" ] && VIA="$VIA:at=$LOCATION"
+
+          jq --arg name "$NAME" --arg type "$TYPE" --arg date "$RAW_DATE" --arg via "$VIA" \
+             '. += [{name: $name, type: $type, date: $date, via: $via}]' \
+             signatures/signatures.json > tmp.json
+          mv tmp.json signatures/signatures.json
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name "grc-garden-bot"
+          git config user.email "actions@github.com"
+          git add signatures/signatures.json
+          git commit -m "Plant a paper signature (witnessed by ${{ github.actor }})"
+          git push
