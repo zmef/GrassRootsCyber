@@ -1,0 +1,51 @@
+name: 🌱 Plant your signature
+description: Sign the Grass Roots Cyber Statement of Organization and claim your plot in the garden.
+title: "Signature: [YOUR NAME HERE]"
+labels: [signature]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Welcome to the garden.** Signing makes you a member of Grass Roots Cyber —
+        it's free, voluntary, and you can leave anytime. Your name, type, and date
+        will be added to the [public roll](../blob/main/signatures/signatures.json)
+        by our automation (which you can [audit here](../blob/main/.github/workflows/add-signature.yml)).
+
+        Before signing, give the [Statement of Organization](../blob/main/grassrootscyber_statement.md)
+        a read. It's short.
+
+  - type: input
+    id: name
+    attributes:
+      label: Name or Organization
+      description: Real name, pseudonym, or org name — your call. Max 80 characters.
+      placeholder: Ada Lovelace, or Prairie Makers Collective
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Representation
+      options:
+        - Individual
+        - Organization
+    validations:
+      required: true
+
+  - type: input
+    id: date
+    attributes:
+      label: Date
+      description: "Must be YYYY-MM-DD (example: 2026-06-12)"
+      placeholder: "2026-06-12"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: affirm
+    attributes:
+      label: Affirmation
+      options:
+        - label: I've read the Statement of Organization and support the mission of Grass Roots Cyber.
+          required: true
