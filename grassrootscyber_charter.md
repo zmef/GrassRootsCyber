@@ -31,7 +31,7 @@ All are welcome who come in good faith. We honor diversity, self-determination, 
 - **When it’s over, it’s over.**
 - **If you’re not learning or contributing, use your two feet.**
 
-These [Open Space Technology (OST)] (https://www.facilitator.school/blog/open-space-technology) principles are how we gather, decide, and build. 
+These [Open Space Technology (OST)](https://www.facilitator.school/blog/open-space-technology) principles are how we gather, decide, and build. 
 
 ## Decision-Making
 We do not vote—we convene.
